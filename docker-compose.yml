@@ -1,0 +1,153 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-changeme}
+      POSTGRES_DB: trading_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://trading:changeme@db:5432/trading_bot}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-me-to-a-32-byte-base64-key}
+      - SECRET_KEY=${SECRET_KEY:-change-me-please-use-a-secure-random-string}
+      - OPENROUTER_API_BASE=${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemma-4-31b-it}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://trading:changeme@db:5432/trading_bot}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-me-to-a-32-byte-base64-key}
+      - SECRET_KEY=${SECRET_KEY:-change-me-please-use-a-secure-random-string}
+      - OPENROUTER_API_BASE=${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemma-4-31b-it}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://trading:changeme@db:5432/trading_bot}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-me-to-a-32-byte-base64-key}
+      - SECRET_KEY=${SECRET_KEY:-change-me-please-use-a-secure-random-string}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - OPENROUTER_API_BASE=${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemma-4-31b-it}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DEFAULT_TIMEFRAME=${DEFAULT_TIMEFRAME:-1h}
+      - DEFAULT_INITIAL_CAPITAL=${DEFAULT_INITIAL_CAPITAL:-10000}
+      - MAX_POSITION_PCT=${MAX_POSITION_PCT:-2.0}
+      - MAX_DRAWDOWN_PCT=${MAX_DRAWDOWN_PCT:-10.0}
+      - DAILY_LOSS_LIMIT_PCT=${DAILY_LOSS_LIMIT_PCT:-5.0}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+    volumes:
+      - ./dashboard:/app
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+volumes:
+  postgres_data:
+  redis_data:

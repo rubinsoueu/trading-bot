@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+.env.production
+*.egg-info/
+dist/
+build/
+
+# Docker
+docker-compose.override.yml
+postgres_data/
+redis_data/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Backups & reports
+backups/
+reports/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node (dashboard deps)
+node_modules/
+
+# Credentials / secrets
+*.pem
+*.key
+*.p12
+
+# Local Databases
+*.db
+*.sqlite
+*.sqlite3
